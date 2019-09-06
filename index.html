@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Airline data visualization</title>
+	<script type="text/javascript" src="http://d3js.org/d3.v3.min.js"></script>
+	<style type="text/css">
+		body {
+			font: Arial 12px;
+			text-align: center;
+		}
+
+		.link {
+			  stroke: #ccc;
+			}
+
+		.node text {
+			pointer-events: none;
+			font: sans-serif;
+			fill: steelblue;
+		}
+		input[type='radio'], label{  
+		    vertical-align: baseline;
+		    padding: 10px;
+		    margin: 10px;
+		    width: 10%;
+		 }
+
+		 .radioLeft{
+		 	width : 20%;
+		 }
+
+	</style>
+	<link rel="stylesheet" type="text/css" href="main.css">
+</head>
+<body>
+	<form class="radioLeft" align = "left">
+		<br>CHOOSE THE REQUIRED VISUALIZATION<br>
+	    <input type="radio" name="link-source" value="pLinksTo" onclick="update(1)" checked>Passengers To India<br>
+	    <input type="radio" name="link-source" value="pLinksFrom" onclick="update(2)">Passengers From India<br>
+	    <input type="radio" name="link-source" value="fLinksTo" onclick="update(3)">Freight to India<br>
+	    <input type="radio" name="link-source" value="fLinksFrom" onclick="update(4)">Freight From India<br>
+	    <br><h3> Link threshold <br><br>0 <input type="range" id="thersholdSlider" step="0.0001" name="points" title="Threshold Slider" value = 1 min="0" max="1" onchange="threshold(this.value)" oninput="sliderChange(this.val)"> 1 </h3><br>
+	     Threshold value: <output id="output"></output>
+	</form>
+
+	<script type="text/javascript">
+		sliderChange(1)
+		var margin = {
+			top: 50,
+			bottom: 50,
+			right: 30,
+			left: 50
+		};
+		var width = 1000 - margin.left - margin.right;
+		var height = 1000 - margin.top - margin.bottom
+			graph = null,
+			force = null,
+			weightScale = null,
+			nodeData = null,
+		 	graphRec= null,
+		 	linksRec = null
+		 	nodes = null,
+		 	links = null
+		 	linksValue = null, 
+			distanceScale = d3.scale.linear()
+							.domain([0, 1])
+							.range([width/5, width/10]);
+		var boolDict = {
+			1 : true,
+			2 : false,
+			3 : false,
+			4 : false
+		}
+
+		var restartboolDict = {
+			1 : false,
+			2 : false,
+			3 : false,
+			4 : false
+		}
+		//create svg element
+		var svg = d3.select("body")
+					.append("svg")
+					.attr("width", width)
+					.attr("height", height)
+					.attr("transform", "translate(100, -400)");
+
+		d3.json("airlinedata.json", function(dataset) {
+			//Extract data from dataset
+			graph = dataset;
+			nodeData = graph.nodes,
+			linkData = graph.pLinksTo
+			graphRec=JSON.parse(JSON.stringify(graph)); 
+			linksRec = graphRec.pLinksTo
+			linksValue = 1;
+
+			// console.log(nodeData)
+			// console.log(linkData)
+
+			force = d3.layout.force()
+							.size([width, height])
+							.nodes(nodeData)
+							.links(linkData)
+							.gravity(0.07)
+							.charge(-200)
+							.linkDistance(function(link){
+								return distanceScale(link.weight);
+							})
+							.linkStrength(function(link){
+								return 10 * link.weight;
+							});
+
+
+			weightScale = d3.scale.linear()
+								.domain([0, 1])
+								.range([4, 10]);
+
+			links = svg.selectAll(".link")
+							.data(linkData);
+
+			links.enter()
+				.append("line")
+				.attr("stroke-width", function(d){ return (d.weight == 0) ? 0 : weightScale(d.weight); })
+				.attr("class", "link");
+
+
+			links.append("title")
+					.attr("dx", 12)
+					.attr("dy", "0.35em")
+					.attr("font-size", 8)
+					.text(function(d){ return d.value + " PASSENGERS FROM " + nodeData[d.source].name + " TO " + nodeData[d.target].name ; });
+
+			nodes = svg.selectAll(".node")
+							.data(nodeData)
+							.enter()
+							.append("g")
+							.attr("class", "node")
+							.call(force.drag);
+
+			var nodeTitle = nodes.append("title")
+							.attr("dx", 12)
+							.attr("dy", "0.35em")
+							.attr("font-size", 8)
+							.text(function(d){ return d.name; });
+
+			var circle = nodes.append("circle")
+							.attr("r", 15)
+							.attr("fill", "steelblue")
+							.attr("stroke", "black")
+							.attr("stroke-width", 1);
+
+			var linkedIndices = {};
+			linkData.forEach(function(d) {
+				linkedIndices[d.source.id + "," + d.target.id] = 1;
+			});
+
+			function isConnected(a, b) {
+				return linkedIndices[a.id + "," + b.id]
+						|| linkedIndices[b.id + "," + a.id]
+						|| a.id == b.id;
+			}
+
+			// On node hover, examine the links to see if their
+			// source or target properties match the hovered node.
+			function highlightNode(opacity, weightFactor) {
+				return function(d) {
+					nodes.attr("stroke-opacity", function(l) {
+						nodeOpacity = isConnected(d,l) || l.id === 0 && d.id !== 0 ? 1 : opacity;
+						this.setAttribute("fill-opacity", nodeOpacity);
+						return nodeOpacity;
+					});
+
+					links.attr("stroke-opacity", function(y){
+						return y.source === d || y.target === d ? 1 : opacity;
+					});
+				}
+			}
+
+			nodes.on("mouseover", highlightNode(0.1, 2.5))
+				.on("mouseout", highlightNode(1, 1));
+
+
+			function highlightLink(opacity, weightFactor) {
+				return function(d) {
+					nodes.attr("stroke-opacity", function(l) {
+						nodeOpacity = (l.id === d.source.id || l.id === d.target.id) ? 1 : opacity;
+						this.setAttribute("fill-opacity", nodeOpacity);
+						return nodeOpacity;
+					});
+
+					links.attr("stroke-opacity", function(k) {	
+						return (k == d) ? 1 : opacity;
+					}).attr("stroke-width", function(k) {
+						// console.log(k)
+			    		if(k.weight === 0)	return 0;
+			    		else
+			    			return (weightFactor * weightScale(k.weight)> 6 && k==d) 
+			    					?  weightScale(k.weight) : weightFactor * weightScale(k.weight);
+					});
+				}
+			}
+
+			links.on("mouseover", highlightLink(0.1, 5))
+				.on("mouseout", highlightLink(1, 1));
+
+
+			force.on("tick", function(){
+				nodes.attr("cx", function(d){ return d.x; })
+					.attr("cy", function(d){ return d.y; });
+
+				links.attr("x1", function(d){ return d.source.x; })
+					.attr("y1", function(d){ return d.source.y; })
+					.attr("x2", function(d){ return d.target.x; })
+					.attr("y2", function(d){ return d.target.y; });
+
+				nodes.attr("transform", function(d){ return "translate(" + d.x + "," + d.y +")"});
+			});
+
+
+
+			force.start();
+		});
+
+		function update(key) {
+				threshold(1);
+				document.getElementById("thersholdSlider").value = 1;
+				linksValue = key;
+				var flag;
+				if(key === 1){
+					linkData = graph.pLinksTo;
+					flag = boolDict['1'];
+					boolDict['1'] = true;
+				}
+				if(key === 2){
+					linkData = graph.pLinksFrom;
+					flag = boolDict['2'];
+					boolDict['2'] = true;
+				}
+				if(key === 3){
+					linkData = graph.fLinksTo;
+					flag = boolDict['3'];
+					boolDict['3'] = true;
+				}
+				if(key === 4){
+					linkData = graph.fLinksFrom;
+					flag = boolDict['4'];
+					boolDict['4'] = true;
+				}
+				force.stop();
+				force = force.links(linkData)
+							.linkDistance(function(link){
+								return distanceScale(link.weight);
+							})
+							.linkStrength(function(link){
+								return 10 * link.weight;
+							});
+
+				var newLinks = svg.selectAll(".link")
+								.data(linkData);
+
+				newLinks.enter()
+						.append("line");
+
+				newLinks.exit().remove();
+				newLinks.attr("stroke-width", function(d){ return (d.weight === 0)? 0: weightScale(d.weight); });
+
+				var textList = svg.selectAll("line").select("title").data(linkData);
+				console.log(textList);
+
+				textList.enter().append("title");
+
+				textList.exit().remove();
+
+				textList.attr("dx", 12)
+						.attr("dy", "0.35em")
+						.attr("font-size", 8);
+
+				var txt = "PASSENGERS"
+				if(key > 2)
+					txt = "FREIGHT UNITS"
+
+				if(!flag) {
+					textList.text(function(d){ 
+							return d.value + " " + txt + " FROM " + nodeData[d.source].name
+							 + " TO " + nodeData[d.target].name; 
+						});
+				} else {
+					textList.text(function(d){ 
+							return d.value + " " + txt + " FROM " + d.source.name
+							 + " TO " + d.target.name; 
+						});
+				}
+
+				force.start();
+				sliderChange(1);
+			}
+
+			//adjust threshold
+			function threshold(thresh) {
+			    if(linksValue === 1) {
+			    	graph.pLinksTo.splice(0, graph.pLinksTo.length);
+					for (var i = 0; i < graphRec.pLinksTo.length; i++) {
+						if (graphRec.pLinksTo[i].weight < thresh) 
+							{graph.pLinksTo.push(graphRec.pLinksTo[i]);}
+					}
+					for (var i = 0; i < graphRec.pLinksTo.length; i++) {
+						if (graphRec.pLinksTo[i].weight == thresh && parseInt(thresh) !== 0) 
+							{graph.pLinksTo.push(graphRec.pLinksTo[i]);}
+					}
+			    }
+			    if(linksValue === 2) {
+			    	graph.pLinksFrom.splice(0, graph.pLinksFrom.length);
+					for (var i = 0; i < graphRec.pLinksFrom.length; i++) {
+						if (graphRec.pLinksFrom[i].weight < thresh) 
+							{graph.pLinksFrom.push(graphRec.pLinksFrom[i]);}
+					}
+					for (var i = 0; i < graphRec.pLinksFrom.length; i++) {
+						if (graphRec.pLinksFrom[i].weight == thresh && parseInt(thresh) !== 0) 
+							{graph.pLinksFrom.push(graphRec.pLinksFrom[i]);}
+					}
+			    }
+			    if(linksValue === 4) {
+			    	graph.fLinksFrom.splice(0, graph.fLinksFrom.length);
+					for (var i = 0; i < graphRec.fLinksFrom.length; i++) {
+						if (graphRec.fLinksFrom[i].weight < thresh) 
+							{graph.fLinksFrom.push(graphRec.fLinksFrom[i]);}
+					}
+					for (var i = 0; i < graphRec.fLinksFrom.length; i++) {
+						if (graphRec.fLinksFrom[i].weight == thresh && parseInt(thresh) !== 0) 
+							{graph.fLinksFrom.push(graphRec.fLinksFrom[i]);}
+					}
+			    }
+			    if(linksValue === 3) {
+			    	graph.fLinksTo.splice(0, graph.fLinksTo.length);
+					for (var i = 0; i < graphRec.fLinksTo.length; i++) {
+						if (graphRec.fLinksTo[i].weight < thresh) 
+							{graph.fLinksTo.push(graphRec.fLinksTo[i]);}
+					}
+					for (var i = 0; i < graphRec.fLinksTo.length; i++) {
+						if (graphRec.fLinksTo[i].weight == thresh && parseInt(thresh) !== 0) 
+							{graph.fLinksTo.push(graphRec.fLinksTo[i]);}
+					}
+			    }
+			    console.log(graph.pLinksTo);
+			    restart();
+			}
+			//Restart the visualisation after any node and link changes
+			function restart() {
+				var restartKey;
+				if(linksValue === 1) {
+					linkData = graph.pLinksTo;
+					restartKey = 1;
+				}
+				if(linksValue === 2){
+					linkData = graph.pLinksFrom;
+					restartKey = 2;
+				}
+				if(linksValue === 3) {
+					linkData = graph.fLinksTo;
+					restartKey = 3;
+				}
+				if(linksValue === 4){
+					linkData = graph.fLinksFrom;
+					restartKey = 4;
+				}
+				links = links.data(linkData)
+				
+				var unit = "PASSENGERS";
+				if(linksValue > 2)
+					unit = "FREIGHT UNITS";
+				links.exit().remove();
+				console.log(links.enter());
+				links.enter().insert("line", ".node")
+							.attr("class", "link")
+							.attr("stroke-width", function(d){
+								console.log(d);
+							 	return (d.weight === 0)? 0: weightScale(d.weight); 
+							})
+							.append("title")
+							.attr("dx", 12)
+							.attr("dy", "0.35em")
+							.attr("font-size", 8);
+
+				var textList = svg.selectAll("line").select("title").data(linkData);
+				console.log(textList);
+
+				if(!restartboolDict[restartKey]) {
+					textList.text(function(d){ return d.value + " " + unit+ " FROM " + nodeData[d.source].name + " TO " + nodeData[d.target].name ; });
+					restartboolDict[restartKey] = true;
+				} else
+					textList.text(function(d){ return d.value + " " + unit+ " FROM " + d.source.name + " TO " + d.target.name ; });
+				
+				function highlightLink(opacity, weightFactor) {
+					return function(d) {
+						nodes.attr("stroke-opacity", function(l) {
+							nodeOpacity = (l.id === d.source.id || l.id === d.target.id) ? 1 : opacity;
+							this.setAttribute("fill-opacity", nodeOpacity);
+							return nodeOpacity;
+						});
+
+						links.attr("stroke-opacity", function(k) {	
+							return (k == d) ? 1 : opacity;
+						}).attr("stroke-width", function(k) {
+							if(k.weight === 0)	return 0;
+				    		else
+					    		return (weightFactor * weightScale(k.weight)> 6 && k==d) ?  weightScale(k.weight) : weightFactor * weightScale(k.weight);
+						});
+					}
+				}
+
+				links.on("mouseover", highlightLink(0.1, 5))
+					.on("mouseout", highlightLink(1, 1));
+				force.start();
+			}
+
+			function sliderChange(val) {
+			   var val = document.getElementById("thersholdSlider").value //gets the oninput value
+			   document.getElementById('output').innerHTML = val //displays this value to the html page
+			};
+	</script>
+</body>
+</html>
